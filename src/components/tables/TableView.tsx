@@ -1,737 +1,588 @@
-import { useEffect, useState, useRef } from 'react';
-import { TableInfo, fetchTableData, deleteRow, updateRow, insertRow, fetchTableColumns } from '@/lib/api';
-import supabase from '@/lib/api';
-import LoadingSpinner from '../ui/LoadingSpinner';
-import ErrorDisplay from '../ui/ErrorDisplay';
-import TableActions from './TableActions';
-import { Button } from '@/components/ui/button';
-import { toast } from 'sonner';
-import VoiceInputDialog from '@/components/ui/VoiceInputDialog';
-import { getCurrentUser, getUserRole } from '@/lib/auth';
-import { processFieldData } from '@/lib/dataUtils';
 
-// Import our new components and utilities
-import FilterSection from './components/FilterSection';
-import DataTable from './components/DataTable';
-import DetailedViewDialog from './components/DetailedViewDialog';
-import InsertDialog from './components/InsertDialog';
-import useReferenceData from './hooks/useReferenceData';
-import { 
-  formatColumnName, 
-  isFieldRequired, 
-  shouldUseDropdown,
-  shouldUseDatePicker, 
-  isColumnEditable, 
-  shouldUseTextarea, 
-  shouldUseImageUpload, 
-  shouldHideColumn,
-  getPlaceholder
-} from './utils/tableHelpers';
+import { useState, useEffect } from 'react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Edit, Trash2, Plus, Download, Upload, Search, X, Filter } from 'lucide-react';
+import { supabase } from '@/integrations/supabase/client';
+import LoadingSpinner from '@/components/ui/LoadingSpinner';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { AlertCircle } from 'lucide-react';
+import { fetchTableColumns } from '@/lib/api';
+import { toast } from 'sonner';
+import TableActions from './TableActions';
+import CsvUpload from './CsvUpload';
+import { TableFieldFormatter, capitalizeFirstLetter, isFieldRequired } from './TableFieldFormatter';
 
 type TableViewProps = {
-  table: TableInfo;
+  table: any;
 };
 
 const TableView = ({ table }: TableViewProps) => {
   const [data, setData] = useState<any[]>([]);
   const [columns, setColumns] = useState<string[]>([]);
-  const [allColumns, setAllColumns] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [editingRow, setEditingRow] = useState<any | null>(null);
-  const [isEditing, setIsEditing] = useState(false);
-  const [newRow, setNewRow] = useState<any>({});
-  const [isInsertDialogOpen, setIsInsertDialogOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [filteredData, setFilteredData] = useState<any[]>([]);
-  const [filterValues, setFilterValues] = useState<Record<string, string>>({});
-  const [detailedViewRow, setDetailedViewRow] = useState<any | null>(null);
-  const [isDetailedViewOpen, setIsDetailedViewOpen] = useState(false);
-  const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
-  const [displayColumns, setDisplayColumns] = useState<string[]>([]);
-  const [isVoiceInputDialogOpen, setIsVoiceInputDialogOpen] = useState(false);
-  const [isEditModeInDetailView, setIsEditModeInDetailView] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const userRole = getUserRole();
-  
-  // Use our custom hook for reference data
-  const { 
-    getDropdownOptions, 
-    loading: refDataLoading 
-  } = useReferenceData();
+  const [selectedRow, setSelectedRow] = useState<any | null>(null);
+  const [showForm, setShowForm] = useState(false);
+  const [formData, setFormData] = useState<Record<string, any>>({});
+  const [isEditing, setIsEditing] = useState(false);
+  const [showUpload, setShowUpload] = useState(false);
+  const [formDataSource, setFormDataSource] = useState<any>(null);
+  const [entityIdField, setEntityIdField] = useState<string>('id');
 
-  // Load table data
-  const loadTableData = async () => {
-    setLoading(true);
-    setError(null);
-    
-    try {
-      console.log(`Fetching columns for table ${table.name}`);
-      
-      const tableColumns = await fetchTableColumns(table.name);
-      if (tableColumns) {
-        console.log(`Columns for ${table.name}:`, tableColumns);
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        setLoading(true);
+        setError(null);
         
-        // Filter out columns that should be hidden based on user role
-        const visibleColumns = tableColumns.filter(col => !shouldHideColumn(col, userRole));
+        const tableName = table.name.toLowerCase();
         
-        setAllColumns(tableColumns);
-        
-        if (table.name === 'students') {
-          const limitedColumns = visibleColumns.filter(col => 
-            ['student_id', 'first_name', 'last_name', 'photo', 'dob', 'contact_number', 'student_email'].includes(col)
-          );
-          setDisplayColumns(limitedColumns);
-          setColumns(limitedColumns);
-        } else {
-          setDisplayColumns(visibleColumns);
-          setColumns(visibleColumns);
+        // Determine the entity ID field based on the table name
+        let idField = 'id';
+        if (tableName === 'students') {
+          idField = 'student_id';
+        } else if (tableName === 'employees') {
+          idField = 'employee_id';
+        } else if (tableName === 'educators') {
+          idField = 'employee_id';
         }
-      } else {
-        console.error(`No columns returned for ${table.name}`);
+        
+        setEntityIdField(idField);
+        
+        const columnsData = await fetchTableColumns(tableName);
+        if (!columnsData) {
+          setError('Failed to fetch table columns');
+          return;
+        }
+        
+        setColumns(columnsData);
+        
+        let query = supabase.from(tableName).select('*');
+        
+        if (tableName.toLowerCase() === 'students' && table.center_id) {
+          query = query.eq('center_id', table.center_id);
+        } else if (table.center_id) {
+          query = query.eq('center_id', table.center_id);
+        }
+        
+        const { data: tableData, error: fetchError } = await query;
+        
+        if (fetchError) {
+          console.error('Error fetching data:', fetchError);
+          setError('Failed to fetch data');
+          return;
+        }
+        
+        setData(tableData || []);
+        setFilteredData(tableData || []);
+        
+        const defaultFormData: Record<string, any> = {};
+        columnsData.forEach(col => {
+          defaultFormData[col] = '';
+        });
+        
+        if (table.center_id) {
+          defaultFormData.center_id = table.center_id;
+        }
+        
+        setFormData(defaultFormData);
+        
+      } catch (err) {
+        console.error('Error in fetchData:', err);
+        setError('An unexpected error occurred');
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    fetchData();
+
+    const handleOpenStudentForm = (event: CustomEvent<any>) => {
+      if (table.name.toLowerCase() === 'students') {
+        const { formData: prefillData, sourceEntry, onSuccess } = event.detail;
+        
+        setFormData(prefillData);
+        setFormDataSource({ sourceEntry, onSuccess });
+        setIsEditing(false);
+        setSelectedRow(null);
+        setShowForm(true);
+        toast.success('Student form opened with prefilled data');
+      }
+    };
+
+    window.addEventListener('openStudentForm', handleOpenStudentForm as EventListener);
+
+    return () => {
+      window.removeEventListener('openStudentForm', handleOpenStudentForm as EventListener);
+    };
+  }, [table]);
+
+  useEffect(() => {
+    if (!searchTerm.trim()) {
+      setFilteredData(data);
+      return;
+    }
+    
+    const searchTermLower = searchTerm.toLowerCase();
+    const filtered = data.filter(item => {
+      return Object.entries(item).some(([key, value]) => {
+        if (
+          value !== null &&
+          typeof value !== 'object' &&
+          value.toString().toLowerCase().includes(searchTermLower)
+        ) {
+          return true;
+        }
+        return false;
+      });
+    });
+    
+    setFilteredData(filtered);
+  }, [searchTerm, data]);
+
+  const handleRowClick = (row: any) => {
+    setSelectedRow(row);
+    setIsEditing(true);
+    
+    const rowFormData: Record<string, any> = {};
+    columns.forEach(col => {
+      rowFormData[col] = row[col] !== null ? row[col] : '';
+    });
+    
+    setFormData(rowFormData);
+    setShowForm(true);
+  };
+
+  const handleInputChange = (field: string, value: any) => {
+    setFormData({
+      ...formData,
+      [field]: value,
+    });
+  };
+
+  const handleAddToEducators = async (employeeData: any) => {
+    try {
+      // First check if the employee is already an educator
+      const { data: existingEducator, error: checkError } = await supabase
+        .from('educators')
+        .select('*')
+        .eq('employee_id', employeeData.employee_id)
+        .maybeSingle();
+        
+      if (checkError) {
+        console.error('Error checking for existing educator:', checkError);
+        throw new Error('Failed to check if employee is already an educator');
       }
       
-      console.log(`Fetching data from ${table.name} with center_id: ${table.center_id}`);
-      const result = await fetchTableData(table.name, table.center_id);
-      if (result) {
-        console.log(`Loaded ${result.length} records from ${table.name}:`, result);
-        setData(result);
-        setFilteredData(result);
-      } else {
-        console.error(`Failed to load data from ${table.name}`);
-        setError('Failed to load table data. Please try again.');
+      if (existingEducator) {
+        toast.error('This employee is already registered as an educator');
+        return;
       }
+      
+      // Create educator record - Fix the field mapping to match database schema
+      const { data: educatorData, error: educatorError } = await supabase
+        .from('educators')
+        .insert({
+          employee_id: employeeData.employee_id,
+          center_id: employeeData.center_id,
+          name: employeeData.name,
+          designation: employeeData.designation,
+          email: employeeData.email,
+          phone: employeeData.phone,
+          date_of_birth: employeeData.date_of_birth, // Correct field name instead of 'dob'
+          date_of_joining: employeeData.date_of_joining,
+          work_location: employeeData.work_location || null,
+          status: employeeData.status || 'Active',
+          photo: employeeData.photo || null
+        })
+        .select();
+        
+      if (educatorError) {
+        console.error('Error adding educator:', educatorError);
+        throw new Error('Failed to add educator record');
+      }
+      
+      toast.success('Employee successfully added as an educator');
+      
+      // If we're on the educators table, refresh the data
+      if (table.name.toLowerCase() === 'educators') {
+        window.location.reload();
+      }
+      
+      return educatorData;
     } catch (err) {
-      console.error('Error in loadTableData:', err);
-      setError('An unexpected error occurred. Please try again.');
+      console.error('Error in handleAddToEducators:', err);
+      throw err;
+    }
+  };
+
+  const handleSave = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      const tableName = table.name.toLowerCase();
+      
+      const updateData: Record<string, any> = {};
+      columns.forEach(col => {
+        updateData[col] = formData[col] !== null ? formData[col] : null;
+      });
+      
+      const idField = entityIdField;
+      
+      const { data: updatedData, error: updateError } = await supabase
+        .from(tableName)
+        .update(updateData)
+        .eq(idField, selectedRow[idField])
+        .select();
+        
+      if (updateError) {
+        console.error('Error updating record:', updateError);
+        toast.error('Failed to update record');
+        return;
+      }
+      
+      toast.success('Record updated successfully');
+      
+      setData(data.map(item => (item[idField] === selectedRow[idField] ? updatedData[0] : item)));
+      setFilteredData(filteredData.map(item => (item[idField] === selectedRow[idField] ? updatedData[0] : item)));
+      setShowForm(false);
+      
+      // If this is an employee record, check if we need to update educator record as well
+      if (tableName === 'employees' && formData.is_educator === true) {
+        try {
+          await handleAddToEducators(updatedData[0]);
+        } catch (err) {
+          console.error('Error handling educator record:', err);
+          // Continue even if there's an error with the educator record
+        }
+      }
+      
+    } catch (err) {
+      console.error('Error in handleSave:', err);
+      setError('An unexpected error occurred');
     } finally {
       setLoading(false);
     }
   };
 
-  // Setup real-time subscription
-  useEffect(() => {
-    if (!table.name) return;
-    
-    console.log(`Setting up real-time subscription for ${table.name}`);
-    
-    const channel = supabase
-      .channel(`${table.name}-changes`)
-      .on('postgres_changes', { 
-        event: '*', 
-        schema: 'public', 
-        table: table.name.toLowerCase() 
-      }, (payload) => {
-        console.log('Change received:', payload);
-        loadTableData();
-      })
-      .subscribe();
-    
-    return () => {
-      console.log(`Cleaning up subscription for ${table.name}`);
-      supabase.removeChannel(channel);
-    };
-  }, [table.id, table.name]);
-  
-  // Initial data load
-  useEffect(() => {
-    loadTableData();
-  }, [table.id, table.name, table.center_id]);
-
-  // Filter data based on search and filter values
-  useEffect(() => {
-    let result = [...data];
-    
-    if (searchTerm) {
-      result = result.filter(row => 
-        Object.entries(row).some(([key, value]) => 
-          key !== 'id' && 
-          value !== null && 
-          String(value)
-            .toLowerCase()
-            .includes(searchTerm.toLowerCase())
-        )
-      );
-    }
-    
-    Object.entries(filterValues).forEach(([column, value]) => {
-      if (value) {
-        result = result.filter(row => 
-          row[column] !== undefined && 
-          row[column] !== null &&
-          String(row[column])
-            .toLowerCase()
-            .includes(value.toLowerCase())
-        );
-      }
-    });
-    
-    setFilteredData(result);
-  }, [data, searchTerm, filterValues]);
-
-  // Handle image upload
-  const handleImageUpload = async (file: File, rowData: any, fieldName: string) => {
+  const handleAdd = async () => {
     try {
-      const fileExt = file.name.split('.').pop();
-      const fileName = `${Date.now()}_${Math.random().toString(36).substring(2, 15)}.${fileExt}`;
-      const filePath = `${table.name}/${fileName}`;
+      setLoading(true);
+      setError(null);
       
-      // Upload file to Supabase Storage
-      const { data, error } = await supabase.storage
-        .from('images')
-        .upload(filePath, file);
+      const tableName = table.name.toLowerCase();
       
-      if (error) {
-        throw error;
-      }
-      
-      // Get public URL
-      const { data: urlData } = supabase.storage
-        .from('images')
-        .getPublicUrl(filePath);
-      
-      if (urlData && urlData.publicUrl) {
-        const publicUrl = urlData.publicUrl;
-        
-        // Update row data with image URL
-        if (isEditing && editingRow) {
-          setEditingRow({
-            ...editingRow,
-            [fieldName]: publicUrl
-          });
-        } else if (isInsertDialogOpen) {
-          setNewRow({
-            ...newRow,
-            [fieldName]: publicUrl
-          });
-        } else if (detailedViewRow) {
-          setDetailedViewRow({
-            ...detailedViewRow,
-            [fieldName]: publicUrl
-          });
+      const insertData: Record<string, any> = {};
+      columns.forEach(col => {
+        // Skip created_at field to let database set it automatically
+        if (col !== 'created_at' && formData[col] !== undefined) {
+          insertData[col] = formData[col] !== null && formData[col] !== '' ? formData[col] : null;
         }
-        
-        toast.success('Image uploaded successfully', {
-          duration: 3000,
-          dismissible: true
-        });
-        
-        return publicUrl;
-      }
-    } catch (error) {
-      console.error('Error uploading image:', error);
-      toast.error('Failed to upload image', {
-        duration: 3000,
-        dismissible: true
       });
-    }
-    
-    return null;
-  };
-
-  // Handle view details mode
-  const handleViewDetails = (row: any) => {
-    setDetailedViewRow({...row});
-    setIsDetailedViewOpen(true);
-    setIsEditModeInDetailView(false); // Start in view mode
-  };
-
-  // Toggle edit mode in detail view
-  const handleToggleEditMode = () => {
-    setIsEditModeInDetailView(!isEditModeInDetailView);
-  };
-
-  // Save changes from detailed view with improved error handling
-  const handleSaveDetailedView = async () => {
-    if (!detailedViewRow) return;
-    
-    try {
-      toast.loading('Saving changes...');
       
-      console.log(`Saving changes to row in ${table.name}:`, detailedViewRow);
-      
-      // Ensure created_at is set
-      if (!detailedViewRow.created_at || detailedViewRow.created_at === '') {
-        detailedViewRow.created_at = new Date().toISOString();
-      }
-      
-      // Process data before submitting
-      const processedData = processFieldData(detailedViewRow);
-      console.log('Processed data for update:', processedData);
-      
-      // Update row in database
-      const { data, error } = await supabase
-        .from(table.name.toLowerCase())
-        .update(processedData)
-        .eq('id', detailedViewRow.id)
-        .select();
-      
-      if (error) {
-        console.error(`Update error in ${table.name}:`, error);
-        toast.dismiss();
-        toast.error(error.message || 'Failed to update record');
-        
-        // Set validation errors if we can determine them
-        if (error.message.includes('violates not-null constraint')) {
-          const field = error.message.match(/column "([^"]+)"/)
-          if (field && field[1]) {
-            setValidationErrors({
-              [field[1]]: `${field[1]} is required`
-            });
-          }
-        }
+      // For educators table, handle the employee relationship
+      if (tableName === 'educators' && !insertData.employee_id) {
+        toast.error('Employee ID is required for educators');
+        setLoading(false);
         return;
       }
       
-      toast.dismiss();
-      toast.success('Record updated successfully');
+      const { data: newRecord, error: insertError } = await supabase
+        .from(tableName)
+        .insert([insertData])
+        .select();
+        
+      if (insertError) {
+        console.error('Error adding record:', insertError);
+        toast.error(`Failed to add record: ${insertError.message}`);
+        setLoading(false);
+        return;
+      }
       
-      setIsDetailedViewOpen(false);
-      setIsEditModeInDetailView(false);
-      loadTableData(); // Refresh data after successful update
+      toast.success('Record added successfully');
+      
+      // If this is an employee record, check if we need to create educator record as well
+      if (tableName === 'employees' && formData.is_educator === true) {
+        try {
+          await handleAddToEducators(newRecord[0]);
+        } catch (err) {
+          console.error('Error handling educator record:', err);
+          // Continue even if there's an error with the educator record
+        }
+      }
+      
+      setData([...data, newRecord[0]]);
+      setFilteredData([...filteredData, newRecord[0]]);
+      setShowForm(false);
+      
+      if (formDataSource && formDataSource.onSuccess) {
+        try {
+          await formDataSource.onSuccess();
+          setFormDataSource(null);
+        } catch (cbError) {
+          console.error('Error in form submission callback:', cbError);
+        }
+      }
+      
     } catch (err) {
-      console.error('Error in handleSaveDetailedView:', err);
-      toast.dismiss();
-      toast.error('An error occurred while updating the record');
+      console.error('Error in handleAdd:', err);
+      setError('An unexpected error occurred');
+    } finally {
+      setLoading(false);
     }
   };
 
-  // Delete a row
-  const handleDeleteRow = async (id: number) => {
-    if (window.confirm(`Are you sure you want to delete this record?`)) {
+  const handleDelete = async (row: any) => {
+    if (window.confirm('Are you sure you want to delete this record?')) {
       try {
-        console.log(`Deleting row with id ${id} from ${table.name}`);
-        const success = await deleteRow(table.name, id);
-        if (success) {
-          toast.success('Record deleted successfully', {
-            duration: 3000,
-            dismissible: true
-          });
-          setIsDetailedViewOpen(false);
-        } else {
-          toast.error('Failed to delete record', {
-            duration: 3000,
-            dismissible: true
-          });
-        }
-      } catch (err) {
-        console.error('Error in handleDeleteRow:', err);
-        toast.error('An error occurred while deleting the record', {
-          duration: 3000,
-          dismissible: true
-        });
-      }
-    }
-  };
-
-  // Edit a row
-  const handleEditClick = (row: any) => {
-    console.log('Editing row:', row);
-    setEditingRow({ ...row });
-    setIsEditing(true);
-    setValidationErrors({});
-  };
-
-  // Handle changes during row editing
-  const handleEditChange = (column: string, value: any) => {
-    console.log(`Changing column ${column} to:`, value);
-    
-    const updatedEditingRow = {
-      ...editingRow,
-      [column]: value,
-    };
-    setEditingRow(updatedEditingRow);
-    
-    // Also update the filtered data for immediate UI feedback
-    const newFilteredData = filteredData.map(row => 
-      row.id === editingRow?.id ? {...row, [column]: value} : row
-    );
-    setFilteredData(newFilteredData);
-    
-    // Clear any validation errors for this field
-    if (validationErrors[column]) {
-      const newErrors = { ...validationErrors };
-      delete newErrors[column];
-      setValidationErrors(newErrors);
-    }
-  };
-
-  // Save edited row with improved error handling
-  const handleSaveEdit = async () => {
-    if (!editingRow) return;
-    
-    try {
-      toast.loading('Saving changes...');
-      
-      // Ensure created_at is set
-      if (!editingRow.created_at || editingRow.created_at === '') {
-        editingRow.created_at = new Date().toISOString();
-      }
-      
-      console.log(`Updating row in ${table.name}:`, editingRow);
-      
-      // Process data before submitting
-      const processedData = processFieldData(editingRow);
-      console.log('Processed data for update:', processedData);
-      
-      // Update row in database
-      const { data, error } = await supabase
-        .from(table.name.toLowerCase())
-        .update(processedData)
-        .eq('id', editingRow.id)
-        .select();
-      
-      if (error) {
-        console.error(`Update error in ${table.name}:`, error);
-        toast.dismiss();
-        toast.error(error.message || 'Failed to update record');
+        setLoading(true);
+        setError(null);
         
-        // Set validation errors if we can determine them
-        if (error.message.includes('violates not-null constraint')) {
-          const field = error.message.match(/column "([^"]+)"/)
-          if (field && field[1]) {
-            setValidationErrors({
-              [field[1]]: `${field[1]} is required`
-            });
-          }
+        const tableName = table.name.toLowerCase();
+        const idField = entityIdField;
+        
+        const { error: deleteError } = await supabase
+          .from(tableName)
+          .delete()
+          .eq(idField, row[idField]);
+          
+        if (deleteError) {
+          console.error('Error deleting record:', deleteError);
+          toast.error('Failed to delete record');
+          return;
         }
-        return;
-      }
-      
-      toast.dismiss();
-      toast.success('Record updated successfully');
-      
-      // Exit edit mode and refresh data
-      setIsEditing(false);
-      setEditingRow(null);
-      setValidationErrors({});
-      loadTableData(); // Refresh data after successful update
-    } catch (err) {
-      console.error('Error in handleSaveEdit:', err);
-      toast.dismiss();
-      toast.error('An error occurred while updating the record');
-    }
-  };
-
-  // Initialize new row for insert
-  const handleInsertClick = () => {
-    const initialNewRow: Record<string, any> = {};
-    
-    // Get the last ID for auto-increment suggestions
-    let lastStudentId = '1000';
-    if (table.name === 'students' && data.length > 0) {
-      // Find highest student_id
-      const studentIds = data
-        .map(row => row.student_id)
-        .filter(id => id && !isNaN(Number(id)))
-        .map(id => Number(id));
-      
-      if (studentIds.length > 0) {
-        lastStudentId = (Math.max(...studentIds) + 1).toString();
+        
+        toast.success('Record deleted successfully');
+        
+        setData(data.filter(item => item[idField] !== row[idField]));
+        setFilteredData(filteredData.filter(item => item[idField] !== row[idField]));
+        
+      } catch (err) {
+        console.error('Error in handleDelete:', err);
+        setError('Failed to delete record');
+      } finally {
+        setLoading(false);
       }
     }
-    
-    allColumns.forEach(column => {
-      if (column === 'center_id' && table.center_id) {
-        initialNewRow[column] = table.center_id.toString();
-      } else if (column === 'program_id' && table.program_id) {
-        initialNewRow[column] = table.program_id.toString();
-      } else if (column === 'created_at') {
-        initialNewRow[column] = new Date().toISOString();
-      } else if (column === 'student_id' && table.name === 'students') {
-        initialNewRow[column] = lastStudentId;
-      } else if (column === 'status') {
-        initialNewRow[column] = 'Active';
-      } else {
-        initialNewRow[column] = '';
-      }
-    });
-    
-    console.log('New row template:', initialNewRow);
-    setNewRow(initialNewRow);
-    setIsInsertDialogOpen(true);
-    setValidationErrors({});
   };
 
-  // Handle change in insert form
-  const handleInsertChange = (column: string, value: any) => {
-    setNewRow({
-      ...newRow,
-      [column]: value,
-    });
-    
-    if (validationErrors[column]) {
-      const newErrors = { ...validationErrors };
-      delete newErrors[column];
-      setValidationErrors(newErrors);
-    }
-  };
-
-  // Submit new row
-  const handleInsertSubmit = async () => {
-    try {
-      if (!newRow.created_at || newRow.created_at === '') {
-        newRow.created_at = new Date().toISOString();
-      }
-      
-      console.log(`Inserting row into ${table.name}:`, newRow);
-      
-      const result = await insertRow(table.name, newRow);
-      if (result.success) {
-        toast.success('Record added successfully', {
-          duration: 3000,
-          dismissible: true
-        });
-        setIsInsertDialogOpen(false);
-        setNewRow({});
-        setValidationErrors({});
-      } else if (result.errors) {
-        console.error('Insert errors:', result.errors);
-        setValidationErrors(result.errors);
-        toast.error('Please correct the validation errors', {
-          duration: 3000,
-          dismissible: true
-        });
-      }
-    } catch (err) {
-      console.error('Error in handleInsertSubmit:', err);
-      toast.error('An error occurred while adding the record', {
-        duration: 3000,
-        dismissible: true
-      });
-    }
-  };
-
-  // Open voice input dialog
-  const handleOpenVoiceInputDialog = () => {
-    setIsVoiceInputDialogOpen(true);
-  };
-
-  // Handle voice input completion
-  const handleVoiceInputComplete = async (data: Record<string, any>) => {
-    try {
-      console.log(`Inserting row into ${table.name} from voice input:`, data);
-      
-      if (table.center_id && !data.center_id) {
-        data.center_id = table.center_id;
-      }
-      
-      if (table.program_id && !data.program_id) {
-        data.program_id = table.program_id;
-      }
-      
-      if (!data.created_at) {
-        data.created_at = new Date().toISOString();
-      }
-      
-      const result = await insertRow(table.name, data);
-      if (result.success) {
-        toast.success('Record added successfully via voice input', {
-          duration: 3000,
-          dismissible: true
-        });
-        setIsVoiceInputDialogOpen(false);
-      } else if (result.errors) {
-        console.error('Insert errors from voice input:', result.errors);
-        toast.error('Failed to add record. Please try again.', {
-          duration: 3000,
-          dismissible: true
-        });
-      }
-    } catch (err) {
-      console.error('Error in handleVoiceInputComplete:', err);
-      toast.error('An error occurred while adding the record', {
-        duration: 3000,
-        dismissible: true
-      });
-    }
-  };
-
-  // Clear search and filters
-  const clearFilters = () => {
-    setFilterValues({});
-    setSearchTerm('');
-  };
-
-  // Apply filter
-  const handleFilterChange = (column: string, value: string) => {
-    setFilterValues(prev => ({
-      ...prev,
-      [column]: value
-    }));
-  };
-
-  // Handle image upload click
-  const handleImageUploadClick = () => {
-    fileInputRef.current?.click();
-  };
-
-  // Loading state
-  if (loading || refDataLoading) {
+  if (loading && data.length === 0) {
     return (
-      <div className="flex items-center justify-center h-64">
+      <div className="flex justify-center items-center h-64">
         <LoadingSpinner size="lg" />
       </div>
     );
   }
 
-  // Error state
   if (error) {
-    return <ErrorDisplay message={error} onRetry={loadTableData} />;
+    return (
+      <Alert variant="destructive">
+        <AlertCircle className="h-4 w-4" />
+        <AlertTitle>Error</AlertTitle>
+        <AlertDescription>{error}</AlertDescription>
+      </Alert>
+    );
   }
 
-  const isFiltered = searchTerm !== '' || Object.values(filterValues).some(v => v !== '');
-
   return (
-    <div className="animate-fade-in">
-      <div className="flex justify-between items-center mb-4">
-        <TableActions 
-          tableName={table.name} 
-          onInsert={handleInsertClick}
-          onRefresh={loadTableData}
-        />
-        
-        <Button 
-          onClick={handleOpenVoiceInputDialog}
-          variant="outline"
-          className="border-ishanya-green text-ishanya-green hover:bg-ishanya-green/10"
-        >
-          <span className="mr-2">🎤</span>
-          Add with Voice
-        </Button>
-      </div>
-      
-      <FilterSection
-        columns={columns}
-        searchTerm={searchTerm}
-        setSearchTerm={setSearchTerm}
-        filterValues={filterValues}
-        handleFilterChange={handleFilterChange}
-        clearFilters={clearFilters}
-        isFiltered={isFiltered}
-        formatColumnName={formatColumnName}
-        displayColumns={displayColumns}
-      />
-      
-      <DataTable
-        displayColumns={displayColumns}
-        filteredData={filteredData}
-        formatColumnName={formatColumnName}
-        isEditing={isEditing}
-        editingRow={editingRow}
-        validationErrors={validationErrors}
-        handleEditChange={handleEditChange}
-        handleSaveEdit={handleSaveEdit}
-        handleEditClick={handleEditClick}
-        handleViewDetails={handleViewDetails}
-        handleDeleteRow={handleDeleteRow}
-        isFieldRequired={(column) => isFieldRequired(column, table.name)}
-        getPlaceholder={getPlaceholder}
-        shouldUseDropdown={shouldUseDropdown}
-        shouldUseDatePicker={shouldUseDatePicker}
-        shouldUseTextarea={shouldUseTextarea}
-        shouldUseImageUpload={shouldUseImageUpload}
-        getDropdownOptions={getDropdownOptions}
-        onImageUploadClick={handleImageUploadClick}
-      />
-
-      {/* Insert Dialog */}
-      <InsertDialog
-        isOpen={isInsertDialogOpen}
-        onOpenChange={setIsInsertDialogOpen}
-        allColumns={allColumns}
-        newRow={newRow}
-        validationErrors={validationErrors}
-        onInsertSubmit={handleInsertSubmit}
-        onInsertChange={handleInsertChange}
-        formatColumnName={formatColumnName}
-        shouldHideColumn={(column) => shouldHideColumn(column, userRole)}
-        isFieldRequired={(column) => isFieldRequired(column, table.name)}
-        getPlaceholder={getPlaceholder}
-        shouldUseDropdown={shouldUseDropdown}
-        shouldUseDatePicker={shouldUseDatePicker}
-        shouldUseTextarea={shouldUseTextarea}
-        shouldUseImageUpload={shouldUseImageUpload}
-        getDropdownOptions={getDropdownOptions}
-        onImageUploadClick={handleImageUploadClick}
-      />
-
-      {/* Detailed View Dialog */}
-      <DetailedViewDialog
-        isOpen={isDetailedViewOpen}
-        onOpenChange={setIsDetailedViewOpen}
-        detailedViewRow={detailedViewRow}
-        isEditMode={isEditModeInDetailView}
-        validationErrors={validationErrors}
-        allColumns={allColumns}
-        formatColumnName={formatColumnName}
-        shouldHideColumn={(column) => shouldHideColumn(column, userRole)}
-        isColumnEditable={isColumnEditable}
-        isFieldRequired={(column) => isFieldRequired(column, table.name)}
-        getPlaceholder={getPlaceholder}
-        shouldUseDropdown={shouldUseDropdown}
-        shouldUseDatePicker={shouldUseDatePicker}
-        shouldUseTextarea={shouldUseTextarea}
-        shouldUseImageUpload={shouldUseImageUpload}
-        getDropdownOptions={getDropdownOptions}
-        onSave={handleSaveDetailedView}
-        onDelete={() => {
-          if (detailedViewRow) {
-            handleDeleteRow(detailedViewRow.id);
-            setIsDetailedViewOpen(false);
-          }
-        }}
-        onImageUploadClick={handleImageUploadClick}
-        onEditModeToggle={handleToggleEditMode}
-        onRowChange={(column, value) => {
-          if (detailedViewRow) {
-            setDetailedViewRow({...detailedViewRow, [column]: value});
-          }
-        }}
+    <div>
+      <TableActions
         tableName={table.name}
-      />
-      
-      <VoiceInputDialog 
-        isOpen={isVoiceInputDialogOpen}
-        onClose={() => setIsVoiceInputDialogOpen(false)}
-        table={table.name}
-        onComplete={handleVoiceInputComplete}
-      />
-      
-      <input 
-        type="file" 
-        ref={fileInputRef} 
-        className="hidden" 
-        accept="image/*" 
-        onChange={async (e) => {
-          const file = e.target.files?.[0];
-          if (file) {
-            // Determine which context we're in and update accordingly
-            if (isEditing && editingRow) {
-              const column = 'photo'; // Default to photo column
-              const url = await handleImageUpload(file, editingRow, column);
-              if (url) {
-                handleEditChange(column, url);
-              }
-            } else if (isInsertDialogOpen) {
-              const column = 'photo';
-              const url = await handleImageUpload(file, newRow, column);
-              if (url) {
-                handleInsertChange(column, url);
-              }
-            } else if (isEditModeInDetailView && detailedViewRow) {
-              const column = 'photo';
-              const url = await handleImageUpload(file, detailedViewRow, column);
-              if (url) {
-                setDetailedViewRow({
-                  ...detailedViewRow,
-                  [column]: url
-                });
-              }
-            }
+        onInsert={() => {
+          setShowForm(true);
+          setIsEditing(false);
+          setSelectedRow(null);
+          setFormDataSource(null);
+          
+          const defaultFormData: Record<string, any> = {};
+          columns.forEach(col => {
+            defaultFormData[col] = '';
+          });
+          
+          if (table.center_id) {
+            defaultFormData.center_id = table.center_id;
           }
+          
+          setFormData(defaultFormData);
         }}
+        onRefresh={() => window.location.reload()}
       />
+      
+      {showUpload && (
+        <Card className="mb-6">
+          <CardHeader className="pb-3">
+            <div className="flex justify-between items-center">
+              <CardTitle>Upload CSV</CardTitle>
+              <Button variant="ghost" size="sm" onClick={() => setShowUpload(false)}>
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <CsvUpload
+              tableName={table.name}
+              onSuccess={() => {
+                setShowUpload(false);
+                window.location.reload();
+              }}
+              onClose={() => setShowUpload(false)}
+            />
+          </CardContent>
+        </Card>
+      )}
+      
+      {showForm && (
+        <Card className="mb-6">
+          <CardHeader className="pb-3">
+            <div className="flex justify-between items-center">
+              <CardTitle>{isEditing ? 'Edit Record' : 'Add Record'}</CardTitle>
+              <Button variant="ghost" size="sm" onClick={() => setShowForm(false)}>
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {columns.map((column) => {
+                // Skip system fields and duplicates
+                if (column === 'created_at') return null;
+                if (column === 'updated_at') return null;
+                
+                // Skip the second occurrence of enrollment_year
+                if (column === 'enrollment_year' && columns.indexOf(column) !== columns.lastIndexOf(column) && 
+                    columns.indexOf(column) > columns.indexOf('enrollment_year')) {
+                  return null;
+                }
+                
+                const isRequired = isFieldRequired(table.name.toLowerCase(), column);
+                
+                // Lock center_id and program_id if they are provided from the table context
+                const isReadOnly = (column === 'center_id' || column === 'program_id') && 
+                                  table[column] !== undefined && table[column] !== null;
+                
+                return (
+                  <div key={column} className="space-y-2">
+                    <Label htmlFor={column}>
+                      {capitalizeFirstLetter(column.replace(/_/g, ' '))}
+                      {isEditing && isRequired && <span className="text-red-500 ml-1">*</span>}
+                    </Label>
+                    <TableFieldFormatter
+                      fieldName={column}
+                      value={formData[column]}
+                      onChange={(value) => handleInputChange(column, value)}
+                      isEditing={!isReadOnly}
+                      isRequired={isRequired}
+                      tableName={table.name.toLowerCase()}
+                      entityId={formData[entityIdField]}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+            <div className="flex justify-end mt-6">
+              <Button onClick={isEditing ? handleSave : handleAdd} disabled={loading}>
+                {loading ? <LoadingSpinner size="sm" className="mr-2" /> : null}
+                {isEditing ? 'Save Changes' : 'Add Record'}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+      
+      <div className="bg-white rounded-md shadow mb-6 overflow-hidden">
+        <div className="p-4 border-b">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-semibold">
+              {table.display_name || table.name} ({filteredData.length})
+            </h2>
+            <div className="relative w-64">
+              <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Search..."
+                className="pl-8"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
+              {searchTerm && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="absolute right-0 top-0 h-full"
+                  onClick={() => setSearchTerm('')}
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
+          </div>
+        </div>
+        
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                {columns.slice(0, 6).map((column) => (
+                  <TableHead key={column}>
+                    {capitalizeFirstLetter(column)}
+                  </TableHead>
+                ))}
+                <TableHead>Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {filteredData.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={columns.slice(0, 6).length + 1} className="h-24 text-center">
+                    No records found
+                  </TableCell>
+                </TableRow>
+              ) : (
+                filteredData.map((row) => (
+                  <TableRow key={row[entityIdField]}>
+                    {columns.slice(0, 6).map((column) => (
+                      <TableCell key={column}>
+                        <TableFieldFormatter
+                          fieldName={column}
+                          value={row[column]}
+                          onChange={() => {}}
+                          isEditing={false}
+                          tableName={table.name.toLowerCase()}
+                          entityId={row[entityIdField]}
+                        />
+                      </TableCell>
+                    ))}
+                    <TableCell>
+                      <div className="flex items-center space-x-2">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleRowClick(row)}
+                        >
+                          <Edit className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleDelete(row)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </div>
+      </div>
     </div>
   );
 };
