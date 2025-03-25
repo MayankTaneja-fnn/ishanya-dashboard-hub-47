@@ -1,15 +1,15 @@
+
 import { useState, useEffect } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { TableInfo, fetchTablesByProgram } from '@/lib/api';
-import LoadingSpinner from '@/components/ui/LoadingSpinner';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { AlertCircle } from 'lucide-react';
-import TableView from './TableView';
+import { Program } from '@/lib/api';
+import { ChevronRight, Database } from 'lucide-react';
+import LoadingSpinner from '../ui/LoadingSpinner';
+import ErrorDisplay from '../ui/ErrorDisplay';
 
 type TableListProps = {
-  program: any;
+  program: Program;
   onSelectTable: (table: TableInfo) => void;
-  selectedTable: TableInfo | null;
+  selectedTable?: TableInfo;
 };
 
 const TableList = ({ program, onSelectTable, selectedTable }: TableListProps) => {
@@ -18,67 +18,72 @@ const TableList = ({ program, onSelectTable, selectedTable }: TableListProps) =>
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const fetchTables = async () => {
+    const loadTables = async () => {
+      setLoading(true);
+      setError(null);
+      
       try {
-        setLoading(true);
-        setError(null);
-
-        const tablesData = await fetchTablesByProgram(program.program_id);
-        if (!tablesData) {
-          setError('Failed to fetch tables');
-          return;
+        console.log(`Loading tables for program ID ${program.program_id}`);
+        // Convert program_id to number to fix the type error
+        const result = await fetchTablesByProgram(Number(program.program_id));
+        if (result) {
+          console.log(`Loaded ${result.length} tables for program ${program.program_id}:`, result);
+          setTables(result);
+        } else {
+          setError("Failed to load tables. Please try again.");
         }
-
-        setTables(tablesData);
       } catch (err) {
-        console.error('Error in fetchTables:', err);
-        setError('An unexpected error occurred');
+        console.error("Error loading tables:", err);
+        setError("An unexpected error occurred while loading tables.");
       } finally {
         setLoading(false);
       }
     };
 
-    fetchTables();
-  }, [program]);
+    loadTables();
+  }, [program.program_id]);
 
   if (loading) {
     return (
-      <div className="flex justify-center items-center h-64">
-        <LoadingSpinner size="lg" />
+      <div className="flex items-center justify-center py-8">
+        <LoadingSpinner size="md" />
       </div>
     );
   }
 
   if (error) {
-    return (
-      <Alert variant="destructive">
-        <AlertCircle className="h-4 w-4" />
-        <AlertTitle>Error</AlertTitle>
-        <AlertDescription>{error}</AlertDescription>
-      </Alert>
-    );
-  }
-
-  if (selectedTable) {
-    return <TableView table={selectedTable} />;
+    return <ErrorDisplay message={error} />;
   }
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-      {tables.map((table) => (
-        <Card
-          key={table.id}
-          className="cursor-pointer hover:shadow-md transition-shadow"
-          onClick={() => onSelectTable(table)}
-        >
-          <CardHeader className="pb-2">
-            <CardTitle>{table.display_name || table.name}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-muted-foreground">{table.description || `Manage ${table.name}`}</p>
-          </CardContent>
-        </Card>
-      ))}
+    <div>
+      <h3 className="text-lg font-medium mb-3 text-ishanya-green">Data Tables</h3>
+      {tables.length === 0 ? (
+        <div className="text-center p-4 bg-gray-50 rounded-md text-gray-500">
+          No tables available for this program
+        </div>
+      ) : (
+        <ul className="space-y-2">
+          {tables.map((table) => (
+            <li key={table.id}>
+              <button
+                onClick={() => onSelectTable(table)}
+                className={`flex items-center justify-between w-full p-3 rounded-md transition-colors ${
+                  selectedTable?.id === table.id
+                    ? 'bg-ishanya-green text-white shadow-md'
+                    : 'bg-white hover:bg-gray-50 border border-gray-100 shadow-sm'
+                }`}
+              >
+                <div className="flex items-center">
+                  <Database className={`h-4 w-4 mr-2 ${selectedTable?.id === table.id ? 'text-white' : 'text-ishanya-green'}`} />
+                  <span className="font-medium">{table.display_name || table.name}</span>
+                </div>
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 };
