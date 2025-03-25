@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -43,7 +42,6 @@ const TableView = ({ table }: TableViewProps) => {
         
         const tableName = table.name.toLowerCase();
         
-        // Determine the entity ID field based on the table name
         let idField = 'id';
         if (tableName === 'students') {
           idField = 'student_id';
@@ -168,7 +166,6 @@ const TableView = ({ table }: TableViewProps) => {
 
   const handleAddToEducators = async (employeeData: any) => {
     try {
-      // First check if the employee is already an educator
       const { data: existingEducator, error: checkError } = await supabase
         .from('educators')
         .select('*')
@@ -185,7 +182,6 @@ const TableView = ({ table }: TableViewProps) => {
         return;
       }
       
-      // Create educator record - Fix the field mapping to match database schema
       const { data: educatorData, error: educatorError } = await supabase
         .from('educators')
         .insert({
@@ -195,7 +191,7 @@ const TableView = ({ table }: TableViewProps) => {
           designation: employeeData.designation,
           email: employeeData.email,
           phone: employeeData.phone,
-          date_of_birth: employeeData.date_of_birth, // Correct field name instead of 'dob'
+          date_of_birth: employeeData.date_of_birth,
           date_of_joining: employeeData.date_of_joining,
           work_location: employeeData.work_location || null,
           status: employeeData.status || 'Active',
@@ -210,7 +206,6 @@ const TableView = ({ table }: TableViewProps) => {
       
       toast.success('Employee successfully added as an educator');
       
-      // If we're on the educators table, refresh the data
       if (table.name.toLowerCase() === 'educators') {
         window.location.reload();
       }
@@ -254,13 +249,11 @@ const TableView = ({ table }: TableViewProps) => {
       setFilteredData(filteredData.map(item => (item[idField] === selectedRow[idField] ? updatedData[0] : item)));
       setShowForm(false);
       
-      // If this is an employee record, check if we need to update educator record as well
       if (tableName === 'employees' && formData.is_educator === true) {
         try {
           await handleAddToEducators(updatedData[0]);
         } catch (err) {
           console.error('Error handling educator record:', err);
-          // Continue even if there's an error with the educator record
         }
       }
       
@@ -281,13 +274,11 @@ const TableView = ({ table }: TableViewProps) => {
       
       const insertData: Record<string, any> = {};
       columns.forEach(col => {
-        // Skip created_at field to let database set it automatically
         if (col !== 'created_at' && formData[col] !== undefined) {
           insertData[col] = formData[col] !== null && formData[col] !== '' ? formData[col] : null;
         }
       });
       
-      // For educators table, handle the employee relationship
       if (tableName === 'educators' && !insertData.employee_id) {
         toast.error('Employee ID is required for educators');
         setLoading(false);
@@ -308,13 +299,11 @@ const TableView = ({ table }: TableViewProps) => {
       
       toast.success('Record added successfully');
       
-      // If this is an employee record, check if we need to create educator record as well
       if (tableName === 'employees' && formData.is_educator === true) {
         try {
           await handleAddToEducators(newRecord[0]);
         } catch (err) {
           console.error('Error handling educator record:', err);
-          // Continue even if there's an error with the educator record
         }
       }
       
@@ -451,11 +440,8 @@ const TableView = ({ table }: TableViewProps) => {
           <CardContent>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {columns.map((column) => {
-                // Skip system fields and duplicates
-                if (column === 'created_at') return null;
-                if (column === 'updated_at') return null;
+                if (column === 'created_at' || column === 'updated_at') return null;
                 
-                // Skip the second occurrence of enrollment_year
                 if (column === 'enrollment_year' && columns.indexOf(column) !== columns.lastIndexOf(column) && 
                     columns.indexOf(column) > columns.indexOf('enrollment_year')) {
                   return null;
@@ -463,7 +449,6 @@ const TableView = ({ table }: TableViewProps) => {
                 
                 const isRequired = isFieldRequired(table.name.toLowerCase(), column);
                 
-                // Lock center_id and program_id if they are provided from the table context
                 const isReadOnly = (column === 'center_id' || column === 'program_id') && 
                                   table[column] !== undefined && table[column] !== null;
                 
