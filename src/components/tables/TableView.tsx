@@ -1,3 +1,4 @@
+
 import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -14,6 +15,9 @@ import { toast } from 'sonner';
 import TableActions from './TableActions';
 import CsvUpload from './CsvUpload';
 import { TableFieldFormatter, capitalizeFirstLetter, isFieldRequired } from './TableFieldFormatter';
+
+// Fields to exclude from forms
+const excludedFields = ['created_at', 'updated_at', 'id'];
 
 type TableViewProps = {
   table: any;
@@ -82,7 +86,9 @@ const TableView = ({ table }: TableViewProps) => {
         
         const defaultFormData: Record<string, any> = {};
         columnsData.forEach(col => {
-          defaultFormData[col] = '';
+          if (!excludedFields.includes(col)) {
+            defaultFormData[col] = '';
+          }
         });
         
         if (table.center_id) {
@@ -150,7 +156,9 @@ const TableView = ({ table }: TableViewProps) => {
     
     const rowFormData: Record<string, any> = {};
     columns.forEach(col => {
-      rowFormData[col] = row[col] !== null ? row[col] : '';
+      if (!excludedFields.includes(col)) {
+        rowFormData[col] = row[col] !== null ? row[col] : '';
+      }
     });
     
     setFormData(rowFormData);
@@ -392,7 +400,9 @@ const TableView = ({ table }: TableViewProps) => {
           
           const defaultFormData: Record<string, any> = {};
           columns.forEach(col => {
-            defaultFormData[col] = '';
+            if (!excludedFields.includes(col)) {
+              defaultFormData[col] = '';
+            }
           });
           
           if (table.center_id) {
@@ -440,7 +450,7 @@ const TableView = ({ table }: TableViewProps) => {
           <CardContent>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {columns.map((column) => {
-                if (column === 'created_at' || column === 'updated_at') return null;
+                if (excludedFields.includes(column)) return null;
                 
                 if (column === 'enrollment_year' && columns.indexOf(column) !== columns.lastIndexOf(column) && 
                     columns.indexOf(column) > columns.indexOf('enrollment_year')) {

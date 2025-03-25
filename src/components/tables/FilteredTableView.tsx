@@ -1,3 +1,4 @@
+
 import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -36,6 +37,9 @@ const requiredFields = {
     'emergency_contact', 'center_id', 'password'
   ]
 };
+
+// Fields to exclude from forms
+const excludedFields = ['created_at', 'updated_at', 'id'];
 
 type FilteredTableViewProps = {
   table: any;
@@ -546,6 +550,21 @@ const FilteredTableView = ({ table }: FilteredTableViewProps) => {
     );
   }
 
+  // Function to determine if a field should be displayed in the form
+  const shouldDisplayField = (column: string): boolean => {
+    // Don't display excluded fields
+    if (excludedFields.includes(column)) {
+      return false;
+    }
+    
+    // Don't display password field for non-admin users unless creating/editing
+    if (column === 'password' && !isFormEditing && userRole !== 'administrator') {
+      return false;
+    }
+    
+    return true;
+  };
+
   return (
     <div>
       <TableActions
@@ -558,7 +577,7 @@ const FilteredTableView = ({ table }: FilteredTableViewProps) => {
           columns.forEach(col => {
             if (col === 'student_id' || col === 'employee_id' || col === 'center_id') {
               defaultFormData[col] = lastRecordId ? lastRecordId + 1 : 1;
-            } else {
+            } else if (!excludedFields.includes(col)) {
               defaultFormData[col] = '';
             }
           });
@@ -733,14 +752,7 @@ const FilteredTableView = ({ table }: FilteredTableViewProps) => {
             )}
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {columns.filter(col => col !== 'id').map((column) => {
-                // Skip password field for non-admin users unless creating/editing
-                if (column === 'password' && 
-                    !isFormEditing && 
-                    userRole !== 'administrator') {
-                  return null;
-                }
-                
+              {columns.filter(col => shouldDisplayField(col)).map((column) => {
                 // Special handling for photo field
                 if (column === 'photo' && isFormEditing) {
                   return (
