@@ -7,11 +7,13 @@ import { Upload, X } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 
+type EntityType = 'student' | 'employee' | 'educator';
+
 type FileUploadProps = {
   bucketName: string;
   onFileUpload: (url: string) => void;
   existingUrl?: string;
-  entityType: 'student' | 'employee' | 'educator';
+  entityType: EntityType;
   entityId?: string | number;
 };
 
@@ -103,18 +105,18 @@ const FileUpload = ({ bucketName, onFileUpload, existingUrl, entityType, entityI
     setPreviewUrl(existingUrl || null);
   };
 
-  const getEntityTypeName = () => {
-    switch (entityType) {
+  const getEntityTypeName = (type: EntityType): string => {
+    switch (type) {
       case 'student': return 'Student';
       case 'employee': return 'Employee';
       case 'educator': return 'Educator';
-      default: return entityType.charAt(0).toUpperCase() + entityType.slice(1);
+      default: return 'File';
     }
   };
 
   return (
     <div className="space-y-4">
-      <Label htmlFor="file-upload">Upload {getEntityTypeName()} Photo</Label>
+      <Label htmlFor="file-upload">Upload {getEntityTypeName(entityType)} Photo</Label>
       
       <div className="flex items-center gap-4">
         <Input
